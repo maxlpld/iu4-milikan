@@ -104,46 +104,55 @@ Launch from the application menu, or run:
 
 ## How the oil drops are detected and tracked
 
-The user gives the initial position by clicking on a visible drop. After that, the program tracks the drop locally:
+The user first selects a visible oil drop by clicking on it in the video. After this first manual selection, the program follows the drop automatically from frame to frame.
 
-1. Around the previous position $(x_{k-1}, y_{k-1})$, it takes a square region of interest.
-2. The region is converted to grayscale and blurred to estimate the local background.
-3. A high-pass image is built to make both bright and dark droplets visible:
+At each frame, the program looks only in a small square region around the previous drop position $(x_{k-1}, y_{k-1})$. This makes the tracking more stable, because the program does not need to search the whole image.
 
-   $$
-   H(x,y) = |I(x,y) - G(x,y)|,
-   $$
+The selected region is converted to grayscale. A blurred version of this grayscale image is then computed to estimate the local background. The drop is highlighted by subtracting this smooth background from the original grayscale image:
 
-   where $I$ is the grayscale image and $G$ is its blurred background.
+$$
+H(x,y) = |I(x,y) - G(x,y)|
+$$
 
-4. Otsu thresholding converts this image into a binary mask:
+Here, $I(x,y)$ is the grayscale image and $G(x,y)$ is the blurred local background. Taking the absolute value makes both bright and dark oil drops visible.
 
-   $$
-   M(x,y) =
-   \begin{cases}
-   1, & H(x,y) > T_\mathrm{Otsu}, \\
-   0, & \text{otherwise}.
-   \end{cases}
-   $$
+The high-pass image is then converted into a binary mask using Otsu thresholding:
 
-5. Small noise blobs and very large reflections are rejected using an area filter.
-6. For each remaining blob, the center is computed from image moments:
+$$
+M(x,y) =
+\begin{cases}
+1, & H(x,y) > T_\mathrm{Otsu} \\
+0, & \text{otherwise}
+\end{cases}
+$$
 
-   $$
-   x_c = \frac{M_{10}}{M_{00}}, \qquad
-   y_c = \frac{M_{01}}{M_{00}}.
-   $$
+Pixels with value $1$ belong to detected objects, while pixels with value $0$ are ignored.
 
-7. The accepted blob closest to the previous position is chosen. If the jump is too large, the detection is rejected.
-8. The new position is smoothed to reduce camera noise:
+Small noise blobs and very large reflections are removed using an area filter. For each remaining blob, the center position is computed from image moments:
 
-   $$
-   \mathbf r_k = \alpha\,\mathbf r_{k-1} + (1-\alpha)\,\mathbf r_{\mathrm{det}},
-   $$
+$$
+x_c = \frac{M_{10}}{M_{00}}
+$$
 
-   with $\alpha = 0.65$ in the current code.
+$$
+y_c = \frac{M_{01}}{M_{00}}
+$$
 
-Tracking stops automatically when the drop is lost for several frames or when it reaches the image border.
+Among all valid blobs, the program keeps the one closest to the previous drop position. If the displacement is too large, the detection is rejected, because it is probably not the same drop.
+
+Finally, the detected position is smoothed to reduce camera noise:
+
+$$
+\mathbf r_k = \alpha \mathbf r_{k-1} + (1-\alpha)\mathbf r_\mathrm{det}
+$$
+
+In the current code, the smoothing parameter is:
+
+$$
+\alpha = 0.65
+$$
+
+Tracking stops automatically if the drop is lost for several frames or if it reaches the image border.
 
 ## Velocity, mean velocity, and error estimate
 
