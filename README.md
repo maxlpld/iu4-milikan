@@ -10,69 +10,38 @@ Manual context: [AP Uni Basel IU4 manual](https://ap.physik.unibas.ch/PDF/Manual
 
 The program should work with **any USB camera** that is visible to Linux as a video device, for example `/dev/video0`, `/dev/video2`, etc. It is not specific to the camera shown in the screenshot. Internally it uses OpenCV `VideoCapture` and tries to list external cameras through `/dev/v4l/by-id` or `v4l2-ctl`.
 
-## Installation: quick local run
+## Installation (Ubuntu 26.04 LTS — all lab users)
 
-On a Linux machine with Python 3:
+This is the **only supported installation method**. It installs IU4 Millikan system-wide under `/opt/iu4-millikan` with its own Python virtual environment and a launcher in the Applications menu. **All users of the computer can run the application without administrator rights.** On Ubuntu GNOME, it also pins the application to the **Dock of the user running the installation** without removing any existing favorites. Other users can launch it from the Applications menu and pin it to their own Dock if desired.
+
+Open a terminal as a normal desktop user (not `root`), then **copy and paste the entire block**. You will be asked for your sudo password. Re-running this block also refreshes an existing installation from GitHub.
 
 ```bash
+bash <<'INSTALL_IU4'
+set -euo pipefail
+
 sudo apt update
-sudo apt install python3-venv v4l-utils
-```
+sudo apt install -y git python3-venv python3-pip v4l-utils libgl1 libglib2.0-0 libxcb-cursor0 desktop-file-utils
 
-Create a virtual environment and install the Python packages:
+# Download a fresh copy from GitHub; remove the temporary download on exit.
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+git clone --depth 1 https://github.com/maxlpld/iu4-milikan.git "$tmp_dir/iu4-milikan"
 
-```bash
-cd iu4-millikan
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install opencv-python PyQt6 numpy
-```
+# Install for all users, replacing only the previous IU4 installation.
+sudo rm -rf /opt/iu4-millikan
+sudo install -d -m 755 /opt/iu4-millikan
+sudo install -m 644 "$tmp_dir/iu4-milikan/iu4millikan.py" "$tmp_dir/iu4-milikan/README.md" "$tmp_dir/iu4-milikan/icon.png" "$tmp_dir/iu4-milikan/Screenshot-IU4.png" /opt/iu4-millikan/
+sudo install -m 755 "$tmp_dir/iu4-milikan/run.sh" /opt/iu4-millikan/run.sh
 
-Run the application:
-
-```bash
-python iu4millikan.py
-```
-
-If the camera is not detected, unplug/replug it and check:
-
-```bash
-v4l2-ctl --list-devices
-```
-
-If Linux denies access to the camera, add your user to the `video` group, then log out and log in again:
-
-```bash
-sudo usermod -aG video $USER
-```
-
-## Optional lab installation in `/opt`
-
-Use this on the lab computer if the application should be available system-wide and launched from the desktop menu.
-
-```bash
-sudo mkdir -p /opt/iu4-millikan
-sudo cp iu4millikan.py README.md run.sh icon.png Screenshot-IU4.png /opt/iu4-millikan/
-sudo chown -R root:root /opt/iu4-millikan
-sudo chmod -R 755 /opt/iu4-millikan
-sudo chmod +x /opt/iu4-millikan/run.sh
-```
-
-Create the virtual environment:
-
-```bash
-sudo apt update
-sudo apt install python3-venv v4l-utils
+# Isolated Python environment: do not install pip packages into system Python.
 sudo python3 -m venv /opt/iu4-millikan/venv
-sudo /opt/iu4-millikan/venv/bin/pip install --upgrade pip
-sudo /opt/iu4-millikan/venv/bin/pip install opencv-python PyQt6 numpy
-```
+sudo /opt/iu4-millikan/venv/bin/python -m pip install --upgrade pip
+sudo /opt/iu4-millikan/venv/bin/python -m pip install opencv-python PyQt6 numpy
+sudo chmod -R a+rX /opt/iu4-millikan
 
-Create the desktop launcher:
-
-```bash
-sudo tee /usr/share/applications/iu4-millikan.desktop > /dev/null <<'EOF_DESKTOP'
+# Desktop application available to everyone on this computer.
+sudo tee /usr/share/applications/iu4-millikan.desktop >/dev/null <<'DESKTOP_ENTRY'
 [Desktop Entry]
 Name=IU4 Millikan Experiment
 Comment=Oil Drop Experiment Application
@@ -80,16 +49,75 @@ Exec=/opt/iu4-millikan/run.sh
 Icon=/opt/iu4-millikan/icon.png
 Terminal=false
 Type=Application
-Categories=Education;
-EOF_DESKTOP
-
+Categories=Education;Science;
+DESKTOP_ENTRY
 sudo update-desktop-database
+
+# Add it to the CURRENT user's Ubuntu GNOME Dock, preserving other favorites.
+if command -v gsettings >/dev/null 2>&1 && [[ "${XDG_CURRENT_DESKTOP:-}" == *GNOME* ]]; then
+    current_favorites="$(gsettings get org.gnome.shell favorite-apps)"
+    updated_favorites="$(FAVORITES="$current_favorites" python3 - <<'PYTHON'
+import ast
+import os
+favorites = ast.literal_eval(os.environ["FAVORITES"].removeprefix("@as "))
+if "iu4-millikan.desktop" not in favorites:
+    favorites.append("iu4-millikan.desktop")
+print(repr(favorites))
+PYTHON
+)"
+    gsettings set org.gnome.shell favorite-apps "$updated_favorites"
+fi
+
+echo "IU4 Millikan installed. Launch from the Dock / Applications menu."
+INSTALL_IU4
 ```
 
-Launch from the application menu, or run:
+The launcher uses `/opt/iu4-millikan/run.sh`. You can also start it manually:
 
 ```bash
 /opt/iu4-millikan/run.sh
+```
+
+### Camera troubleshooting
+
+If the camera is not detected, unplug and reconnect it, then check:
+
+```bash
+v4l2-ctl --list-devices
+```
+
+If your user lacks permission to access the camera, run the following once and **log out and back in** to apply the group change:
+
+```bash
+sudo usermod -aG video "$USER"
+```
+
+## Uninstall
+
+Copy and paste the entire block to remove the application, desktop launcher, and its entry from the **current user's** GNOME Dock. It leaves experimental CSV/video data in your home folder untouched.
+
+```bash
+bash <<'UNINSTALL_IU4'
+set -euo pipefail
+
+# Unpin for the current user without changing their other Dock favorites.
+if command -v gsettings >/dev/null 2>&1 && [[ "${XDG_CURRENT_DESKTOP:-}" == *GNOME* ]]; then
+    current_favorites="$(gsettings get org.gnome.shell favorite-apps)"
+    updated_favorites="$(FAVORITES="$current_favorites" python3 - <<'PYTHON'
+import ast
+import os
+favorites = ast.literal_eval(os.environ["FAVORITES"].removeprefix("@as "))
+print(repr([app for app in favorites if app != "iu4-millikan.desktop"]))
+PYTHON
+)"
+    gsettings set org.gnome.shell favorite-apps "$updated_favorites"
+fi
+
+sudo rm -rf /opt/iu4-millikan
+sudo rm -f /usr/share/applications/iu4-millikan.desktop
+sudo update-desktop-database
+echo "IU4 Millikan uninstalled (saved experimental data preserved)."
+UNINSTALL_IU4
 ```
 
 ## How to use
